@@ -1,0 +1,83 @@
+resources:
+  # VPC
+  - name: vpc
+    type: compute.v1.network
+    properties:
+      name: pal-vpc
+      autoCreateSubnetworks: false
+
+  # Subnets
+  - name: private-subnet-1
+    type: compute.v1.subnetwork
+    properties:
+      name: pal-private-subnet-1
+      region: us-central1
+      network: $(ref.vpc.selfLink)
+      ipCidrRange: 10.0.1.0/24
+      privateIpGoogleAccess: true
+
+  - name: private-subnet-2
+    type: compute.v1.subnetwork
+    properties:
+      name: pal-private-subnet-2
+      region: us-central1
+      network: $(ref.vpc.selfLink)
+      ipCidrRange: 10.0.2.0/24
+      privateIpGoogleAccess: true
+
+  # Router
+  - name: router
+    type: compute.v1.router
+    properties:
+      name: pal-router
+      region: us-central1
+      network: $(ref.vpc.selfLink)
+
+  # NAT (for private GKE nodes to access the internet)
+  - name: nat
+    type: compute.v1.router
+    properties:
+      name: pal-router
+      region: us-central1
+      network: $(ref.vpc.selfLink)
+      nats:
+        - name: pal-nat
+          natIpAllocateOption: AUTO_ONLY
+          sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+
+  # GKE Cluster (Zonal cluster using v1beta1 type)
+  - name: gke-cluster
+    type: gcp-types/container-v1beta1:projects.zones.clusters
+    properties:
+      zone: us-central1-a
+      cluster:
+        name: pal-gke-cluster
+        network: $(ref.vpc.selfLink)
+        subnetwork: $(ref.private-subnet-1.selfLink)
+        privateClusterConfig:
+          enablePrivateNodes: true
+          enablePrivateEndpoint: false
+          masterIpv4CidrBlock: 172.16.0.0/28
+        initialNodeCount: 1
+        # Removed removeDefaultNodePool to fix the error
+        workloadIdentityConfig:
+          workloadPool: "moonlit-album-456806-r7.svc.id.goog"
+
+  # GKE Node Pool (Using v1beta1 type)
+  - name: node-pool
+    type: gcp-types/container-v1beta1:projects.zones.clusters.nodePools
+    properties:
+      zone: us-central1-a
+      clusterId: $(ref.gke-cluster.name)
+      nodePool:
+        name: pal-node-pool
+        initialNodeCount: 1
+        config:
+          machineType: e2-small
+          oauthScopes:
+            - https://www.googleapis.com/auth/cloud-platform
+          preemptible: true
+        autoscaling:
+          enabled: true
+          minNodeCount: 1
+          maxNodeCount: 3
